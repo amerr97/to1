@@ -1,3 +1,6 @@
+Aplikacija se pokrece preko linka: https://amerr97.github.io/to1/
+
+
 Aplikacija za automatsko računanje Trigonometrijskog obrazca 1 iz geodezije
 Omogućava raznovrstan export podataka, kao sto je pdf. csv, txt, json
 Moguće je razmijeniti cijeli projekat sa nekim drugim korisnikom Export (json), import (json).
