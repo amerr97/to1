@@ -7,7 +7,8 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Plus, Trash2, RotateCcw, Save, Download, Info, Menu, X, Home, Calculator, Upload, FileText, ShieldCheck, Share2, FileDown, Briefcase, Calendar, BookOpen, ChevronRight, ChevronLeft, MoreVertical } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
+import { saveAs } from 'file-saver';
 
 // --- Types ---
 
@@ -448,20 +449,39 @@ export default function App() {
       let stationSumF1 = 0;
       let stationSumF2 = 0;
 
-      if (index > 0) {
-        tableData.push([{ content: "", colSpan: 11, styles: { minCellHeight: 4, border: 0 } }]);
-      }
-
       group.rows.forEach(row => {
         const meanSec = parseDMS(row.mean) * 3600;
         const redMeanSec = parseDMS(row.reducedMean) * 3600;
         const f1Sec = parseDMS(row.face1) * 3600;
-        const f2Sec = (parseDMS(row.face2) - 180) * 3600;
+        const f2Sec = parseDMS(row.face2) * 3600; // Raw value for Kontrole logic
 
-        stationSumMean += meanSec;
-        stationSumReducedMean += redMeanSec;
-        stationSumF1 += f1Sec;
-        stationSumF2 += f2Sec;
+        stationSumMean += Math.round(meanSec);
+        stationSumReducedMean += Math.round(redMeanSec);
+        stationSumF1 += Math.round(f1Sec);
+        stationSumF2 += Math.round(f2Sec);
+      });
+
+      const firstMeanSec = group.rows.length > 0 && group.rows[0].mean.trim() ? Math.round(parseDMS(group.rows[0].mean) * 3600) : 0;
+      const k2Part1 = firstMeanSec * group.rows.length;
+
+      if (index > 0) {
+        tableData.push([{ content: "", colSpan: 11, styles: { minCellHeight: 4, border: 0 } }]);
+      }
+
+      group.rows.forEach((row, i) => {
+        let kontrola1 = "";
+        let kontrola2 = "";
+
+        if (i === 0) {
+          kontrola1 = formatSecondsToDMS(stationSumF1);
+          kontrola2 = formatSecondsToDMS(k2Part1);
+        } else if (i === 1) {
+          kontrola1 = formatSecondsToDMS(stationSumF2);
+          kontrola2 = formatSecondsToDMS(stationSumReducedMean);
+        } else if (i === 2) {
+          kontrola1 = formatSecondsToDMS((stationSumF1 + stationSumF2) / 2);
+          kontrola2 = formatSecondsToDMS(k2Part1 + stationSumReducedMean);
+        }
 
         tableData.push([
           { content: row.station, styles: { fontStyle: 'bold' } },
@@ -473,8 +493,8 @@ export default function App() {
           row.collimation,
           row.mean,
           row.reducedMean,
-          formatSecondsToDMS((f1Sec + f2Sec) / 2),
-          row.mean.trim() ? formatSecondsToDMS((parseDMS(group.rows[0].mean) * 3600) + redMeanSec) : ""
+          kontrola1,
+          kontrola2
         ]);
       });
 
@@ -489,7 +509,7 @@ export default function App() {
         { content: formatSecondsToDMS(stationSumMean), styles: { fontStyle: 'bold', fillColor: [240, 240, 240] } },
         { content: formatSecondsToDMS(stationSumReducedMean), styles: { fontStyle: 'bold', fillColor: [240, 240, 240] } },
         { content: formatSecondsToDMS((stationSumF1 + stationSumF2) / 2), styles: { fontStyle: 'bold', fillColor: [240, 240, 240] } },
-        { content: group.rows.length > 0 && group.rows[0].mean.trim() ? formatSecondsToDMS((parseDMS(group.rows[0].mean) * 3600 * group.rows.length) + stationSumReducedMean) : "", styles: { fontStyle: 'bold', fillColor: [240, 240, 240] } }
+        { content: group.rows.length > 0 && group.rows[0].mean.trim() ? formatSecondsToDMS(k2Part1 + stationSumReducedMean) : "", styles: { fontStyle: 'bold', fillColor: [240, 240, 240] } }
       ]);
     });
 
@@ -660,8 +680,66 @@ export default function App() {
     doc.save(`sredina_girusa_${new Date().toISOString().split('T')[0]}.pdf`);
   };
 
-  const exportExcel = () => {
-    // Group rows by station for Kontrole sheet
+  const exportExcel = async () => {
+    const workbook = new ExcelJS.Workbook();
+    const sheet1 = workbook.addWorksheet('Kontrole');
+    const sheet2 = workbook.addWorksheet('Redukovane Sredine');
+
+    // Styling constants
+    const headerStyle: Partial<ExcelJS.Style> = {
+      font: { bold: true, color: { argb: 'FFFFFFFF' }, size: 9 },
+      fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF3C3C3C' } },
+      alignment: { horizontal: 'center', vertical: 'middle' },
+      border: {
+        top: { style: 'thin', color: { argb: 'FF000000' } },
+        left: { style: 'thin', color: { argb: 'FF000000' } },
+        bottom: { style: 'thin', color: { argb: 'FF000000' } },
+        right: { style: 'thin', color: { argb: 'FF000000' } }
+      }
+    };
+
+    const dataStyle: Partial<ExcelJS.Style> = {
+      font: { size: 9 },
+      alignment: { vertical: 'middle' },
+      border: {
+        top: { style: 'thin', color: { argb: 'FF000000' } },
+        left: { style: 'thin', color: { argb: 'FF000000' } },
+        bottom: { style: 'thin', color: { argb: 'FF000000' } },
+        right: { style: 'thin', color: { argb: 'FF000000' } }
+      }
+    };
+
+    const sumaStyle: Partial<ExcelJS.Style> = {
+      font: { bold: true, size: 9 },
+      fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0F0F0' } },
+      alignment: { vertical: 'middle' },
+      border: {
+        top: { style: 'thin', color: { argb: 'FF000000' } },
+        left: { style: 'thin', color: { argb: 'FF000000' } },
+        bottom: { style: 'thin', color: { argb: 'FF000000' } },
+        right: { style: 'thin', color: { argb: 'FF000000' } }
+      }
+    };
+
+    // --- SHEET 1: KONTROLE ---
+    sheet1.columns = [
+      { header: 'ST', key: 'station', width: 10 },
+      { header: 'PT', key: 'point', width: 10 },
+      { header: 'I Pol.', key: 'face1', width: 15 },
+      { header: 'Dužina I', key: 'distance1', width: 12 },
+      { header: 'II Pol.', key: 'face2', width: 15 },
+      { header: 'Dužina II', key: 'distance2', width: 12 },
+      { header: '2C', key: 'collimation', width: 8 },
+      { header: 'Sredina', key: 'mean', width: 15 },
+      { header: 'Reduk.', key: 'reducedMean', width: 15 },
+      { header: 'Kontrola 1', key: 'k1', width: 18 },
+      { header: 'Kontrola 2', key: 'k2', width: 18 }
+    ];
+
+    sheet1.getRow(1).eachCell((cell) => {
+      cell.style = headerStyle;
+    });
+
     const groups: { station: string, rows: RowData[] }[] = [];
     let currentGroup: { station: string, rows: RowData[] } | null = null;
     
@@ -677,13 +755,14 @@ export default function App() {
       }
     });
 
-    const kontroleData: any[] = [];
     groups.forEach(group => {
       const stationRows = group.rows;
-      const stationSumF1 = getRawSecondsSum(stationRows.map(r => r.face1));
-      const stationSumF2 = getRawSecondsSum(stationRows.map(r => r.face2));
-      const stationSumMean = getRawSecondsSum(stationRows.map(r => r.mean));
-      const stationSumReducedMean = getRawSecondsSum(stationRows.map(r => r.reducedMean));
+      const stationSumF1 = Math.round(getRawSecondsSum(stationRows.map(r => r.face1)));
+      const stationSumF2 = Math.round(getRawSecondsSum(stationRows.map(r => r.face2)));
+      const stationSumMean = Math.round(getRawSecondsSum(stationRows.map(r => r.mean)));
+      const stationSumReducedMean = Math.round(getRawSecondsSum(stationRows.map(r => r.reducedMean)));
+      const firstMeanSec = stationRows.length > 0 && stationRows[0].mean.trim() ? Math.round(parseDMS(stationRows[0].mean) * 3600) : 0;
+      const k2Part1 = firstMeanSec * stationRows.length;
 
       stationRows.forEach((r, idx) => {
         let k1 = "";
@@ -691,51 +770,83 @@ export default function App() {
         
         if (idx === 0) {
           k1 = formatSecondsToDMS(stationSumF1);
-          k2 = formatSecondsToDMS(parseDMS(stationRows[0].mean) * 3600 * stationRows.length);
+          k2 = formatSecondsToDMS(k2Part1);
         } else if (idx === 1) {
           k1 = formatSecondsToDMS(stationSumF2);
           k2 = formatSecondsToDMS(stationSumReducedMean);
         } else if (idx === 2) {
           k1 = formatSecondsToDMS((stationSumF1 + stationSumF2) / 2);
-          k2 = formatSecondsToDMS((parseDMS(stationRows[0].mean) * 3600 * stationRows.length) + stationSumReducedMean);
+          k2 = formatSecondsToDMS(k2Part1 + stationSumReducedMean);
         }
 
-        kontroleData.push({
-          "ST": r.station,
-          "PT": r.point,
-          "I Pol.": r.face1,
-          "Dužina I": r.distance1,
-          "II Pol.": r.face2,
-          "Dužina II": r.distance2,
-          "2C": r.collimation,
-          "Sredina": r.mean,
-          "Reduk.": r.reducedMean,
-          "Kontrola 1": k1,
-          "Kontrola 2": k2
+        const dataRow = sheet1.addRow({
+          station: r.station,
+          point: r.point,
+          face1: r.face1,
+          distance1: r.distance1,
+          face2: r.face2,
+          distance2: r.distance2,
+          collimation: r.collimation,
+          mean: r.mean,
+          reducedMean: r.reducedMean,
+          k1: k1,
+          k2: k2
         });
+
+        // Ensure every column in the row gets a border, even if empty
+        for (let col = 1; col <= 11; col++) {
+          const cell = dataRow.getCell(col);
+          cell.style = dataStyle;
+        }
+
+        dataRow.getCell('station').alignment = { horizontal: 'center', vertical: 'middle' };
+        dataRow.getCell('point').alignment = { horizontal: 'center' };
+        dataRow.getCell('face1').alignment = { horizontal: 'center' };
+        dataRow.getCell('distance1').alignment = { horizontal: 'right' };
+        dataRow.getCell('face2').alignment = { horizontal: 'center' };
+        dataRow.getCell('distance2').alignment = { horizontal: 'right' };
+        dataRow.getCell('collimation').alignment = { horizontal: 'center' };
+        dataRow.getCell('mean').alignment = { horizontal: 'center' };
+        dataRow.getCell('reducedMean').alignment = { horizontal: 'center' };
+        dataRow.getCell('k1').alignment = { horizontal: 'center' };
+        dataRow.getCell('k2').alignment = { horizontal: 'center' };
       });
 
       // Add SUMA row
-      kontroleData.push({
-        "ST": "SUMA",
-        "PT": "",
-        "I Pol.": formatSecondsToDMS(stationSumF1),
-        "Dužina I": "",
-        "II Pol.": formatSecondsToDMS(stationSumF2),
-        "Dužina II": "",
-        "2C": "",
-        "Sredina": formatSecondsToDMS(stationSumMean),
-        "Reduk.": formatSecondsToDMS(stationSumReducedMean),
-        "Kontrola 1": formatSecondsToDMS((stationSumF1 + stationSumF2) / 2),
-        "Kontrola 2": formatSecondsToDMS((parseDMS(stationRows[0].mean) * 3600 * stationRows.length) + stationSumReducedMean)
+      const sumaRow = sheet1.addRow({
+        station: 'SUMA',
+        face1: formatSecondsToDMS(stationSumF1),
+        face2: formatSecondsToDMS(stationSumF2),
+        mean: formatSecondsToDMS(stationSumMean),
+        reducedMean: formatSecondsToDMS(stationSumReducedMean),
+        k1: formatSecondsToDMS((stationSumF1 + stationSumF2) / 2),
+        k2: stationRows.length > 0 && stationRows[0].mean.trim() ? formatSecondsToDMS(k2Part1 + stationSumReducedMean) : ""
       });
+
+      // Apply style to the entire row (all columns) to ensure color and borders don't stop
+      for (let col = 1; col <= 11; col++) {
+        const cell = sumaRow.getCell(col);
+        cell.style = sumaStyle;
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      }
       
-      // Add empty row for spacing between stations
-      kontroleData.push({});
+      sheet1.mergeCells(sumaRow.number, 1, sumaRow.number, 2);
+      // Removed empty row for consistent continuous grid
     });
 
-    // Sheet 2: Redukovane sredine (ugao ostaje D-M-S)
-    const reducedData = reducedRows.map(r => {
+    // --- SHEET 2: REDUKOVANE SREDINE ---
+    sheet2.columns = [
+      { header: 'Stajalište', key: 'station', width: 15 },
+      { header: 'Tačka', key: 'point', width: 12 },
+      { header: 'Redukovana Sredina', key: 'reducedMean', width: 22 },
+      { header: 'Prosječna Dužina [m]', key: 'avgDistance', width: 22 }
+    ];
+
+    sheet2.getRow(1).eachCell((cell) => {
+      cell.style = headerStyle;
+    });
+
+    reducedRows.forEach(r => {
       const d1 = parseFloat(r.distance1);
       const d2 = parseFloat(r.distance2);
       let avgDistance = '-';
@@ -743,32 +854,27 @@ export default function App() {
       else if (!isNaN(d1)) avgDistance = d1.toFixed(3);
       else if (!isNaN(d2)) avgDistance = d2.toFixed(3);
 
-      return {
-        "Stajalište": r.displayStation,
-        "Tačka": r.point,
-        "Redukovana Sredina": r.reducedMean,
-        "Prosječna Dužina [m]": avgDistance
-      };
+      const row = sheet2.addRow({
+        station: r.displayStation,
+        point: r.point,
+        reducedMean: r.reducedMean,
+        avgDistance: avgDistance
+      });
+
+      // Ensure every column gets a border
+      for (let col = 1; col <= 4; col++) {
+        const cell = row.getCell(col);
+        cell.style = dataStyle;
+      }
+      
+      row.getCell('station').alignment = { horizontal: 'center', vertical: 'middle' };
+      row.getCell('point').alignment = { horizontal: 'center' };
+      row.getCell('reducedMean').alignment = { horizontal: 'center' };
+      row.getCell('avgDistance').alignment = { horizontal: 'right' };
     });
 
-    const wb = XLSX.utils.book_new();
-    const ws1 = XLSX.utils.json_to_sheet(kontroleData);
-    const ws2 = XLSX.utils.json_to_sheet(reducedData);
-
-    XLSX.utils.book_append_sheet(wb, ws1, "Kontrole");
-    XLSX.utils.book_append_sheet(wb, ws2, "Redukovane Sredine");
-
-    // Generate buffer
-    const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-    const blob = new Blob([wbout], { type: 'application/octet-stream' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `izvjestaj_excel_${new Date().toISOString().split('T')[0]}.xlsx`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    const buffer = await workbook.xlsx.writeBuffer();
+    saveAs(new Blob([buffer]), `izvjestaj_excel_${new Date().toISOString().split('T')[0]}.xlsx`);
   };
 
   const exportDistancesTXT = () => {
@@ -781,7 +887,7 @@ export default function App() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `duzine_jag_${new Date().toISOString().split('T')[0]}.txt`;
+    link.download = `duzine_${new Date().toISOString().split('T')[0]}.txt`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -798,7 +904,7 @@ export default function App() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `pravci_jag_${new Date().toISOString().split('T')[0]}.txt`;
+    link.download = `pravci_${new Date().toISOString().split('T')[0]}.txt`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -1002,7 +1108,7 @@ export default function App() {
               </div>
 
               {/* Table Body */}
-              <div className="divide-y divide-slate-100">
+              <div className="divide-y divide-slate-200 border-x border-slate-200">
                 {(() => {
                   const elements: React.ReactNode[] = [];
                   
@@ -1041,10 +1147,10 @@ export default function App() {
                             </div>
                           )}
                           <div 
-                            className="grid group hover:bg-slate-50 transition-colors"
+                            className="grid group hover:bg-slate-50 transition-colors border-b border-slate-200"
                             style={{ gridTemplateColumns: GRID_LAYOUT_HOME }}
                           >
-                            <div className="border-r border-slate-100 p-0">
+                            <div className="border-r border-slate-200 p-0">
                               <input
                                 type="text"
                                 value={row.station}
@@ -1053,7 +1159,7 @@ export default function App() {
                                 placeholder={isFirstInStationGroup ? group.station : ""}
                               />
                             </div>
-                            <div className="border-r border-slate-100 p-0">
+                            <div className="border-r border-slate-200 p-0">
                               <input
                                 type="text"
                                 value={row.point}
@@ -1062,7 +1168,7 @@ export default function App() {
                                 placeholder="P1"
                               />
                             </div>
-                            <div className="border-r border-slate-100 p-0">
+                            <div className="border-r border-slate-200 p-0">
                               <input
                                 type="text"
                                 value={row.face1}
@@ -1071,7 +1177,7 @@ export default function App() {
                                 placeholder="0-00-00"
                               />
                             </div>
-                            <div className="border-r border-slate-100 p-0">
+                            <div className="border-r border-slate-200 p-0">
                               <input
                                 type="text"
                                 value={row.distance1}
@@ -1080,7 +1186,7 @@ export default function App() {
                                 placeholder="0.000"
                               />
                             </div>
-                            <div className="border-r border-slate-100 p-0">
+                            <div className="border-r border-slate-200 p-0">
                               <input
                                 type="text"
                                 value={row.face2}
@@ -1089,7 +1195,7 @@ export default function App() {
                                 placeholder="180-00-00"
                               />
                             </div>
-                            <div className="border-r border-slate-100 p-0">
+                            <div className="border-r border-slate-200 p-0">
                               <input
                                 type="text"
                                 value={row.distance2}
@@ -1098,13 +1204,13 @@ export default function App() {
                                 placeholder="0.000"
                               />
                             </div>
-                            <div className="border-r border-slate-100 p-1 sm:p-2.5 text-[8px] sm:text-xs flex items-center justify-center font-mono text-slate-400">
+                            <div className="border-r border-slate-200 p-1 sm:p-2.5 text-[8px] sm:text-xs flex items-center justify-center font-mono text-slate-400">
                               {row.collimation}
                             </div>
-                            <div className="border-r border-slate-100 p-1 sm:p-2.5 text-[8px] sm:text-xs flex items-center justify-center font-mono font-bold text-slate-900">
+                            <div className="border-r border-slate-200 p-1 sm:p-2.5 text-[8px] sm:text-xs flex items-center justify-center font-mono font-bold text-slate-900">
                               {row.mean}
                             </div>
-                            <div className="border-r border-slate-100 p-1 sm:p-2.5 text-[8px] sm:text-xs flex items-center justify-center font-mono text-slate-500">
+                            <div className="border-r border-slate-200 p-1 sm:p-2.5 text-[8px] sm:text-xs flex items-center justify-center font-mono text-slate-500">
                               {row.reducedMean}
                             </div>
                             
@@ -1183,7 +1289,7 @@ export default function App() {
               </div>
 
               {/* Table Body */}
-              <div className="divide-y divide-slate-100">
+              <div className="divide-y divide-slate-200 border-x border-slate-200">
                 {(() => {
                   const elements: React.ReactNode[] = [];
                   
@@ -1226,43 +1332,43 @@ export default function App() {
                             <div className="h-4 bg-slate-50/30 border-b border-slate-100"></div>
                           )}
                           <div 
-                            className="grid hover:bg-slate-50 transition-colors"
+                            className="grid hover:bg-slate-50 transition-colors border-b border-slate-200"
                             style={{ gridTemplateColumns: GRID_LAYOUT_CONTROLS }}
                           >
-                            <div className="border-r border-slate-100 p-1 sm:p-2.5 text-[8px] sm:text-[10px] font-bold text-center text-slate-900 flex items-center justify-center">
+                            <div className="border-r border-slate-200 p-1 sm:p-2.5 text-[8px] sm:text-[10px] font-bold text-center text-slate-900 flex items-center justify-center">
                               {row ? row.station : (isFirstInStationGroup ? group.station : "")}
                             </div>
-                            <div className="border-r border-slate-100 p-1 sm:p-2.5 text-[8px] sm:text-[10px] text-center text-slate-700 flex items-center justify-center">
+                            <div className="border-r border-slate-200 p-1 sm:p-2.5 text-[8px] sm:text-[10px] text-center text-slate-700 flex items-center justify-center">
                               {row ? row.point : ""}
                             </div>
-                            <div className="border-r border-slate-100 p-1 sm:p-2.5 text-[8px] sm:text-[10px] text-center font-mono text-slate-600 flex items-center justify-center">
+                            <div className="border-r border-slate-200 p-1 sm:p-2.5 text-[8px] sm:text-[10px] text-center font-mono text-slate-600 flex items-center justify-center">
                               {row ? row.face1 : ""}
                             </div>
-                            <div className="border-r border-slate-100 p-1 sm:p-2.5 text-[8px] sm:text-[10px] text-center font-mono text-slate-600 flex items-center justify-center">
+                            <div className="border-r border-slate-200 p-1 sm:p-2.5 text-[8px] sm:text-[10px] text-center font-mono text-slate-600 flex items-center justify-center">
                               {row ? row.distance1 : ""}
                             </div>
-                            <div className="border-r border-slate-100 p-1 sm:p-2.5 text-[8px] sm:text-[10px] text-center font-mono text-slate-600 flex items-center justify-center">
+                            <div className="border-r border-slate-200 p-1 sm:p-2.5 text-[8px] sm:text-[10px] text-center font-mono text-slate-600 flex items-center justify-center">
                               {row ? row.face2 : ""}
                             </div>
-                            <div className="border-r border-slate-100 p-1 sm:p-2.5 text-[8px] sm:text-[10px] text-center font-mono text-slate-600 flex items-center justify-center">
+                            <div className="border-r border-slate-200 p-1 sm:p-2.5 text-[8px] sm:text-[10px] text-center font-mono text-slate-600 flex items-center justify-center">
                               {row ? row.distance2 : ""}
                             </div>
-                            <div className="border-r border-slate-100 p-1 sm:p-2.5 text-[8px] sm:text-[10px] flex items-center justify-center font-mono text-slate-400">
+                            <div className="border-r border-slate-200 p-1 sm:p-2.5 text-[8px] sm:text-[10px] flex items-center justify-center font-mono text-slate-400">
                               {row ? row.collimation : ""}
                             </div>
-                            <div className="border-r border-slate-100 p-1 sm:p-2.5 text-[8px] sm:text-[10px] flex items-center justify-center font-mono font-bold text-slate-900">
+                            <div className="border-r border-slate-200 p-1 sm:p-2.5 text-[8px] sm:text-[10px] flex items-center justify-center font-mono font-bold text-slate-900">
                               {row ? row.mean : ""}
                             </div>
-                            <div className="border-r border-slate-100 p-1 sm:p-2.5 text-[8px] sm:text-[10px] flex items-center justify-center font-mono text-slate-500">
+                            <div className="border-r border-slate-200 p-1 sm:p-2.5 text-[8px] sm:text-[10px] flex items-center justify-center font-mono text-slate-500">
                               {row ? row.reducedMean : ""}
                             </div>
                             
-                            <div className="border-r border-slate-100 p-1 sm:p-2.5 text-[8px] sm:text-[10px] flex items-center justify-center font-mono bg-blue-50/30 text-blue-600 font-medium">
+                            <div className="border-r border-slate-200 p-1 sm:p-2.5 text-[8px] sm:text-[10px] flex items-center justify-center font-mono bg-blue-50/30 text-blue-600 font-medium">
                               {isFirstInStationGroup ? formatSecondsToDMS(stationSumF1) : 
                                isSecondInStationGroup ? formatSecondsToDMS(stationSumF2) : 
                                isThirdInStationGroup ? formatSecondsToDMS((stationSumF1 + stationSumF2) / 2) : ""}
                             </div>
-                            <div className="border-r border-slate-100 p-1 sm:p-2.5 text-[8px] sm:text-[10px] flex items-center justify-center font-mono bg-emerald-50/30 text-emerald-600 font-medium">
+                            <div className="p-1 sm:p-2.5 text-[8px] sm:text-[10px] flex items-center justify-center font-mono bg-emerald-50/30 text-emerald-600 font-medium">
                               {isFirstInStationGroup ? (
                                 stationRows.length > 0 && stationRows[0].mean.trim() ? 
                                 formatSecondsToDMS(parseDMS(stationRows[0].mean) * 3600 * stationRows.length) : ""
@@ -1282,31 +1388,31 @@ export default function App() {
                     elements.push(
                       <div 
                         key={`suma-${group.station}-${groupIdx}`}
-                        className="grid bg-slate-50/80 border-t border-slate-200 font-mono text-[8px] sm:text-[10px] font-bold"
+                        className="grid bg-slate-100 border-y border-slate-300 font-mono text-[8px] sm:text-[10px] font-bold"
                         style={{ gridTemplateColumns: GRID_LAYOUT_CONTROLS }}
                       >
-                        <div className="p-1 sm:p-2.5 border-r border-slate-100 flex items-center justify-center text-slate-900 uppercase tracking-widest text-[7px] sm:text-[9px]" style={{ gridColumn: '1 / span 2' }}>
+                        <div className="p-1 sm:p-2.5 border-r border-slate-200 flex items-center justify-center text-slate-900 uppercase tracking-widest text-[7px] sm:text-[9px]" style={{ gridColumn: '1 / span 2' }}>
                           SUMA
                         </div>
-                        <div className="p-1 sm:p-2.5 border-r border-slate-100 flex items-center justify-center text-slate-900">
+                        <div className="p-1 sm:p-2.5 border-r border-slate-200 flex items-center justify-center text-slate-900">
                           {formatSecondsToDMS(stationSumF1)}
                         </div>
-                        <div className="p-1 sm:p-2.5 border-r border-slate-100"></div>
-                        <div className="p-1 sm:p-2.5 border-r border-slate-100 flex items-center justify-center text-slate-900">
+                        <div className="p-1 sm:p-2.5 border-r border-slate-200"></div>
+                        <div className="p-1 sm:p-2.5 border-r border-slate-200 flex items-center justify-center text-slate-900">
                           {formatSecondsToDMS(stationSumF2)}
                         </div>
-                        <div className="p-1 sm:p-2.5 border-r border-slate-100"></div>
-                        <div className="p-1 sm:p-2.5 border-r border-slate-100"></div>
-                        <div className="p-1 sm:p-2.5 border-r border-slate-100 flex items-center justify-center text-slate-900">
+                        <div className="p-1 sm:p-2.5 border-r border-slate-200"></div>
+                        <div className="p-1 sm:p-2.5 border-r border-slate-200"></div>
+                        <div className="p-1 sm:p-2.5 border-r border-slate-200 flex items-center justify-center text-slate-900">
                           {formatSecondsToDMS(stationSumMean)}
                         </div>
-                        <div className="p-1 sm:p-2.5 border-r border-slate-100 flex items-center justify-center text-slate-900">
+                        <div className="p-1 sm:p-2.5 border-r border-slate-200 flex items-center justify-center text-slate-900">
                           {formatSecondsToDMS(stationSumReducedMean)}
                         </div>
-                        <div className="p-1 sm:p-2.5 border-r border-slate-100 flex items-center justify-center bg-blue-50/50 text-blue-700">
+                        <div className="p-1 sm:p-2.5 border-r border-slate-200 flex items-center justify-center bg-blue-100/50 text-blue-700">
                           {formatSecondsToDMS((stationSumF1 + stationSumF2) / 2)}
                         </div>
-                        <div className="p-1 sm:p-2.5 border-r border-slate-100 flex items-center justify-center bg-emerald-50/50 text-emerald-700">
+                        <div className="p-1 sm:p-2.5 border-r border-slate-200 flex items-center justify-center bg-emerald-100/50 text-emerald-700">
                           {stationRows.length > 0 && stationRows[0].mean.trim() ? 
                            formatSecondsToDMS((parseDMS(stationRows[0].mean) * 3600 * stationRows.length) + stationSumReducedMean) : ""}
                         </div>
@@ -1457,14 +1563,14 @@ export default function App() {
               </div>
 
               {/* Table Body */}
-              <div className="divide-y divide-slate-100">
+              <div className="divide-y divide-slate-200 border-x border-slate-200">
                 {girusMeans.length > 0 ? (
                   girusMeans.map((item, idx) => (
-                    <div key={`${item.station}-${item.point}-${idx}`} className="grid grid-cols-[0.8fr_1fr_1fr_1.5fr_1fr] hover:bg-slate-50 transition-colors">
-                      <div className="p-1 sm:p-3 border-r border-slate-100 text-[8px] sm:text-xs text-center font-bold text-slate-900">{item.count}x</div>
-                      <div className="p-1 sm:p-3 border-r border-slate-100 text-[8px] sm:text-xs font-bold text-center text-slate-900">{item.station}</div>
-                      <div className="p-1 sm:p-3 border-r border-slate-100 text-[8px] sm:text-xs text-center text-slate-600">{item.point}</div>
-                      <div className="p-1 sm:p-3 border-r border-slate-100 text-[8px] sm:text-xs font-mono font-bold text-blue-600 text-center">{item.mean}</div>
+                    <div key={`${item.station}-${item.point}-${idx}`} className="grid grid-cols-[0.8fr_1fr_1fr_1.5fr_1fr] hover:bg-slate-50 transition-colors border-b border-slate-200">
+                      <div className="p-1 sm:p-3 border-r border-slate-200 text-[8px] sm:text-xs text-center font-bold text-slate-900">{item.count}x</div>
+                      <div className="p-1 sm:p-3 border-r border-slate-200 text-[8px] sm:text-xs font-bold text-center text-slate-900">{item.station}</div>
+                      <div className="p-1 sm:p-3 border-r border-slate-200 text-[8px] sm:text-xs text-center text-slate-600">{item.point}</div>
+                      <div className="p-1 sm:p-3 border-r border-slate-200 text-[8px] sm:text-xs font-mono font-bold text-blue-600 text-center">{item.mean}</div>
                       <div className="p-1 sm:p-3 text-[8px] sm:text-xs text-center font-medium text-slate-400">{item.distance}</div>
                     </div>
                   ))
@@ -1659,7 +1765,7 @@ export default function App() {
               </div>
 
               {/* Table Body */}
-              <div className="divide-y divide-slate-100">
+              <div className="divide-y divide-slate-200 border-x border-slate-200">
                 {reducedRows.length > 0 ? (
                   reducedRows.map((row, index) => {
                     const d1 = parseFloat(row.distance1);
@@ -1679,17 +1785,17 @@ export default function App() {
                     return (
                       <React.Fragment key={row.id}>
                         {isNewStation && (
-                          <div className="h-6 sm:h-8 bg-slate-50/50 border-b border-slate-100 flex items-center px-4 relative">
+                          <div className="h-6 sm:h-8 bg-slate-50/50 border-b border-slate-200 flex items-center px-4 relative">
                             <div className="h-[1px] w-full bg-slate-200"></div>
                             <div className="absolute left-1/2 -translate-x-1/2 bg-slate-50 px-3 py-0.5 rounded-full border border-slate-200">
                               <span className="text-[7px] sm:text-[9px] font-bold uppercase tracking-widest text-slate-400">Novo stajalište</span>
                             </div>
                           </div>
                         )}
-                        <div className="grid grid-cols-[1fr_1fr_1.5fr_1fr] hover:bg-slate-50 transition-colors">
-                          <div className="p-1 sm:p-3 border-r border-slate-100 text-[8px] sm:text-xs font-bold text-center text-slate-900">{row.displayStation}</div>
-                          <div className="p-1 sm:p-3 border-r border-slate-100 text-[8px] sm:text-xs text-center text-slate-600">{row.point}</div>
-                          <div className="p-1 sm:p-3 border-r border-slate-100 text-[8px] sm:text-xs font-mono font-bold text-emerald-600 text-center">{row.reducedMean}</div>
+                        <div className="grid grid-cols-[1fr_1fr_1.5fr_1fr] hover:bg-slate-50 transition-colors border-b border-slate-200">
+                          <div className="p-1 sm:p-3 border-r border-slate-200 text-[8px] sm:text-xs font-bold text-center text-slate-900">{row.displayStation}</div>
+                          <div className="p-1 sm:p-3 border-r border-slate-200 text-[8px] sm:text-xs text-center text-slate-600">{row.point}</div>
+                          <div className="p-1 sm:p-3 border-r border-slate-200 text-[8px] sm:text-xs font-mono font-bold text-emerald-600 text-center">{row.reducedMean}</div>
                           <div className="p-1 sm:p-3 text-[8px] sm:text-xs text-center font-medium text-slate-400">{avgDistance}</div>
                         </div>
                       </React.Fragment>
