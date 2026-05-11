@@ -1924,11 +1924,11 @@ export default function App() {
 
           {/* Footer Copyright Text */}
           <div className="flex flex-col items-center sm:items-end">
-            <p className="text-[9px] uppercase tracking-[0.3em] font-bold text-slate-400">
+            <p className="text-[9px] uppercase tracking-[0.3em] font-bold text-slate-800">
               Trigonomentrijski obrazac 1 &copy; 2026
             </p>
             <p className="text-[7px] text-slate-300 uppercase tracking-widest mt-1 hidden sm:block">
-              Geodetski proračuni v2.0
+              Za pdf izvještaj obrisati zadnji prazan red!
             </p>
           </div>
         </div>
