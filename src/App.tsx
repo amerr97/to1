@@ -1919,7 +1919,7 @@ export default function App() {
               Trigonomentrijski obrazac 1 &copy; 2026
             </p>
             <p className="text-[7px] text-slate-300 uppercase tracking-widest mt-1 hidden sm:block">
-              Geodetski proračuni v2.0
+              Obirsati zadnji prazan red prije PDF izvještaja!
             </p>
           </div>
         </div>
