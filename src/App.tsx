@@ -262,8 +262,19 @@ export default function App() {
     const results: { station: string; point: string; mean: string; meanDecimal: number; distance: string; count: number }[] = [];
     stationMap.forEach((pointMap, station) => {
       pointMap.forEach((data, point) => {
-        const angleSum = data.angles.reduce((acc, val) => acc + val, 0);
-        const avgAngle = angleSum / data.angles.length;
+        // Safe average for angles near 0/360
+        let avgAngle = 0;
+        if (data.angles.length > 0) {
+          const base = data.angles[0];
+          let sumDiff = 0;
+          data.angles.forEach(a => {
+            let diff = a - base;
+            while (diff > 180) diff -= 360;
+            while (diff <= -180) diff += 360;
+            sumDiff += diff;
+          });
+          avgAngle = mod360(base + (sumDiff / data.angles.length));
+        }
         
         let avgDistStr = "-";
         if (data.distances.length > 0) {
@@ -302,10 +313,8 @@ export default function App() {
         while (eDeg > 180) eDeg -= 360;
         row.collimation = secondsOnly(eDeg);
 
-        // Mean = (I + (II - 180)) / 2
-        let dMinus180 = dDeg - 180;
-        while (dMinus180 < 0) dMinus180 += 360;
-        let fDeg = (cDeg + dMinus180) / 2;
+        // Mean = (I + (II - 180)) / 2, but handled safely with eDeg (collimation)
+        let fDeg = cDeg + (eDeg / 2);
         fDeg = mod360(fDeg);
         row.mean = decimalToDMS(fDeg);
       } else {
@@ -479,7 +488,7 @@ export default function App() {
           kontrola1 = formatSecondsToDMS(stationSumF2);
           kontrola2 = formatSecondsToDMS(stationSumReducedMean);
         } else if (i === 2) {
-          kontrola1 = formatSecondsToDMS((stationSumF1 + stationSumF2) / 2);
+          kontrola1 = formatSecondsToDMS((stationSumF1 + stationSumF2 - group.rows.length * 180 * 3600) / 2);
           kontrola2 = formatSecondsToDMS(k2Part1 + stationSumReducedMean);
         }
 
@@ -508,7 +517,7 @@ export default function App() {
         { content: "", styles: { fillColor: [240, 240, 240] } },
         { content: formatSecondsToDMS(stationSumMean), styles: { fontStyle: 'bold', fillColor: [240, 240, 240] } },
         { content: formatSecondsToDMS(stationSumReducedMean), styles: { fontStyle: 'bold', fillColor: [240, 240, 240] } },
-        { content: formatSecondsToDMS((stationSumF1 + stationSumF2) / 2), styles: { fontStyle: 'bold', fillColor: [240, 240, 240] } },
+        { content: formatSecondsToDMS((stationSumF1 + stationSumF2 - group.rows.length * 180 * 3600) / 2), styles: { fontStyle: 'bold', fillColor: [240, 240, 240] } },
         { content: group.rows.length > 0 && group.rows[0].mean.trim() ? formatSecondsToDMS(k2Part1 + stationSumReducedMean) : "", styles: { fontStyle: 'bold', fillColor: [240, 240, 240] } }
       ]);
     });
@@ -775,7 +784,7 @@ export default function App() {
           k1 = formatSecondsToDMS(stationSumF2);
           k2 = formatSecondsToDMS(stationSumReducedMean);
         } else if (idx === 2) {
-          k1 = formatSecondsToDMS((stationSumF1 + stationSumF2) / 2);
+          k1 = formatSecondsToDMS((stationSumF1 + stationSumF2 - stationRows.length * 180 * 3600) / 2);
           k2 = formatSecondsToDMS(k2Part1 + stationSumReducedMean);
         }
 
@@ -819,7 +828,7 @@ export default function App() {
         face2: formatSecondsToDMS(stationSumF2),
         mean: formatSecondsToDMS(stationSumMean),
         reducedMean: formatSecondsToDMS(stationSumReducedMean),
-        k1: formatSecondsToDMS((stationSumF1 + stationSumF2) / 2),
+        k1: formatSecondsToDMS((stationSumF1 + stationSumF2 - stationRows.length * 180 * 3600) / 2),
         k2: stationRows.length > 0 && stationRows[0].mean.trim() ? formatSecondsToDMS(k2Part1 + stationSumReducedMean) : ""
       });
 
@@ -1366,7 +1375,7 @@ export default function App() {
                             <div className="border-r border-slate-200 p-1 sm:p-2.5 text-[8px] sm:text-[10px] flex items-center justify-center font-mono bg-blue-50/30 text-blue-600 font-medium">
                               {isFirstInStationGroup ? formatSecondsToDMS(stationSumF1) : 
                                isSecondInStationGroup ? formatSecondsToDMS(stationSumF2) : 
-                               isThirdInStationGroup ? formatSecondsToDMS((stationSumF1 + stationSumF2) / 2) : ""}
+                               isThirdInStationGroup ? formatSecondsToDMS((stationSumF1 + stationSumF2 - stationRows.length * 180 * 3600) / 2) : ""}
                             </div>
                             <div className="p-1 sm:p-2.5 text-[8px] sm:text-[10px] flex items-center justify-center font-mono bg-emerald-50/30 text-emerald-600 font-medium">
                               {isFirstInStationGroup ? (
@@ -1410,7 +1419,7 @@ export default function App() {
                           {formatSecondsToDMS(stationSumReducedMean)}
                         </div>
                         <div className="p-1 sm:p-2.5 border-r border-slate-200 flex items-center justify-center bg-blue-100/50 text-blue-700">
-                          {formatSecondsToDMS((stationSumF1 + stationSumF2) / 2)}
+                          {formatSecondsToDMS((stationSumF1 + stationSumF2 - stationRows.length * 180 * 3600) / 2)}
                         </div>
                         <div className="p-1 sm:p-2.5 border-r border-slate-200 flex items-center justify-center bg-emerald-100/50 text-emerald-700">
                           {stationRows.length > 0 && stationRows[0].mean.trim() ? 
@@ -1919,7 +1928,7 @@ export default function App() {
               Trigonomentrijski obrazac 1 &copy; 2026
             </p>
             <p className="text-[7px] text-slate-300 uppercase tracking-widest mt-1 hidden sm:block">
-              Obirsati zadnji prazan red prije PDF izvještaja!
+              Geodetski proračuni v2.0
             </p>
           </div>
         </div>
